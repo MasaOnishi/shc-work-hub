@@ -653,13 +653,29 @@ function renderTodo() {
     '<p class="small muted" style="margin:12px 4px">印刷・Excel の書き出し・メールの下書きは、PC で行います。</p>';
 }
 
+/* ---------- 画面の版：新しい版を置いたら、開いたときに自動で読み直す ---------- */
+const PAGE_VERSION = '2026-10-02z';
+async function checkNewPage() {
+  try {
+    const r = await fetch('version.json?t=' + Date.now(), { cache: 'no-store' });
+    if (!r.ok) return;
+    const v = (await r.json()).version;
+    if (v && v !== PAGE_VERSION && sessionStorage.getItem('wh.reloaded') !== v) {
+      sessionStorage.setItem('wh.reloaded', v); // 何度も読み直さないように
+      location.replace(REDIRECT + '?v=' + encodeURIComponent(v));
+    }
+  } catch { /* 電波が無いときは、今の画面のまま */ }
+}
+
 /* ---------- はじまり ---------- */
 (async function main() {
+  checkNewPage();
+  if (new URL(location.href).searchParams.get('v')) history.replaceState(null, '', REDIRECT);
   $('reload').onclick = () => refresh(false);
   $('tabs').querySelectorAll('button').forEach((b) => b.onclick = () => { TAB = b.dataset.tab; LS.set('tab', TAB); SHOW_ALL = false; render(); window.scrollTo(0, 0); });
   $('rcFile').addEventListener('change', (e) => { const fs = [...e.target.files]; e.target.value = ''; sendReceipts(fs); });
   window.addEventListener('online', () => refresh(true));
-  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && LS.get('refresh', null)) refresh(true); });
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState !== 'visible') return; checkNewPage(); if (LS.get('refresh', null)) refresh(true); });
   const u = new URL(location.href);
   if (u.searchParams.get('code')) {
     try { await finishLogin(u.searchParams.get('code'), u.searchParams.get('state')); } catch (e) { return renderLogin(e.message); }
