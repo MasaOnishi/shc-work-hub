@@ -87,6 +87,9 @@ textarea.t{min-height:84px;resize:vertical}
 .step output{flex:1;text-align:center;font-weight:700;font-size:17px}
 .hint{font-size:12.5px;color:var(--ink-faint);margin-top:6px}
 .actions{display:grid;grid-template-columns:1fr 2fr;gap:10px;margin-top:18px}
+.gas{margin-top:18px;padding-top:12px;border-top:1px solid var(--line)}
+.gas-h{font-weight:700;font-size:15px}
+.gasl{display:flex;align-items:center;gap:5px;font-size:12.5px;color:var(--ink-soft);margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom));transform:translateX(-50%);background:#172033;color:#fff;border-radius:12px;padding:10px 16px;font-size:14px;z-index:30;max-width:92vw;box-shadow:0 6px 20px rgba(0,0,0,.25)}
 .toast.err{background:var(--err)}
 .login{text-align:center;padding:28px 18px}
@@ -183,13 +186,22 @@ function dayOf(date) {
   const m = MINE[date];
   return m ? { ...base, ...m.勤務実績, _mine: m } : base;
 }
+// その日のガソリン代（このスマホで直した値 → PC の写しの順）
+function gasOf(date) {
+  const m = MINE[date];
+  if (m && m.ガソリン代) return m.ガソリン代;
+  const s = SNAP && SNAP.ガソリン代 && SNAP.ガソリン代.days && SNAP.ガソリン代.days[date];
+  return s ? { commute: s.commute ?? '', business: s.business ?? '', note: s.note || '' } : { commute: '', business: '', note: '' };
+}
 // PC の写しに、このスマホの直しが入ったら、MINE から外す
 function settleMine() {
   if (!SNAP) return;
   const snapAt = Date.parse(SNAP.作成) || 0;
   for (const [date, m] of Object.entries(MINE)) {
     const s = SNAP.days.find((d) => d.date === date);
-    const same = s && Object.entries(m.勤務実績).every(([k, v]) => String(s[k] ?? '') === String(v ?? ''));
+    const sg = (SNAP.ガソリン代 && SNAP.ガソリン代.days && SNAP.ガソリン代.days[date]) || { commute: '', business: '', note: '' };
+    const gasSame = !m.ガソリン代 || ['commute', 'business', 'note'].every((k) => String(sg[k] ?? '') === String(m.ガソリン代[k] ?? ''));
+    const same = s && gasSame && Object.entries(m.勤務実績).every(([k, v]) => String(s[k] ?? '') === String(v ?? ''));
     if (m.sent && (same || (snapAt > m.at + 10 * 60 * 1000))) delete MINE[date];
   }
   LS.set('mine', MINE);
@@ -231,6 +243,13 @@ function renderLogin(msg) {
   if ($('loginBtn')) $('loginBtn').onclick = () => login().catch((e) => toast(e.message, 'err'));
 }
 const kubunChip = (k) => k ? `<span class="chip k-${esc(k)}">${esc(k)}</span>` : '<span class="chip k-休日">未入力</span>';
+// 一覧の1行：ガソリン代（入っている日だけ）
+function gasLine(date) {
+  const g = gasOf(date);
+  const c = Number(g.commute) || 0, b = Number(g.business) || 0;
+  if (!c && !b && !g.note) return '';
+  return `<div class="gasl"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M5 17h14M6 17l1.5-5h9L18 17M7 12l1.5-4h7L17 12"/><circle cx="8" cy="17" r="1.6"/><circle cx="16" cy="17" r="1.6"/></svg>${c ? `通勤 ${c}` : ''}${c && b ? '・' : ''}${b ? `出張 ${b}` : ''}${c || b ? ' MI' : ''}${g.note ? `　${esc(g.note)}` : ''}</div>`;
+}
 function dayCard(d, today) {
   const dt = new Date(d.date + 'T00:00:00');
   const wd = dt.getDay();
@@ -240,7 +259,7 @@ function dayCard(d, today) {
   return `<button class="day${d.date === today ? ' today' : ''}" data-date="${d.date}" type="button">
     <div class="d-date ${wd === 0 ? 'sun' : wd === 6 ? 'sat' : ''}"><b>${dt.getDate()}</b><span>${dt.getMonth() + 1}月 ${WD[wd]}</span></div>
     <div class="d-body"><div class="d-top">${kubunChip(d.区分)}${work && d.就業場所 ? `<span class="place">${esc(d.就業場所)}</span>` : ''}${d.工番 ? `<span class="muted small">${esc(d.工番)}</span>` : ''}</div>
-      ${work ? `<div class="desc${d.業務内容 ? '' : ' none'}">${d.業務内容 ? esc(d.業務内容) : '業務内容がまだです'}</div>` : ''}${st}</div>
+      ${work ? `<div class="desc${d.業務内容 ? '' : ' none'}">${d.業務内容 ? esc(d.業務内容) : '業務内容がまだです'}</div>` : ''}${gasLine(d.date)}${st}</div>
     ${work ? `<div class="ot">時間外<br><b>${Number(d.時間外勤務 || 0).toFixed(1)}</b>${Number(d.時間外移動 || 0) ? `<br>移動 ${Number(d.時間外移動).toFixed(1)}` : ''}</div>` : ''}
   </button>`;
 }
@@ -276,6 +295,8 @@ function openEditor(date) {
   const places = (SNAP && SNAP.就業場所の一覧) || [];
   const dt = new Date(date + 'T00:00:00');
   const v = { ...d };
+  const presets = (SNAP && SNAP.ガソリン代 && SNAP.ガソリン代.presets) || [];
+  const g = gasOf(date);
   const back = document.createElement('div');
   back.className = 'sheet-back';
   back.innerHTML = `<div class="sheet" role="dialog" aria-label="${dt.getMonth() + 1}月${dt.getDate()}日の勤務">
@@ -293,6 +314,17 @@ function openEditor(date) {
       </div>
     </div>
     <label class="f" for="e_hk">出張中休日区分</label><select class="t" id="e_hk">${hk.map((k) => `<option value="${esc(k)}" ${v.出張中休日区分 === k ? 'selected' : ''}>${k ? esc(k) : '（なし）'}</option>`).join('')}</select>
+    <div class="gas">
+      <div class="gas-h">ガソリン代（自分の車で走った距離）</div>
+      <label class="f" for="g_note">目的</label>
+      <select class="t" id="g_preset"><option value="">よく使う目的から選ぶ…</option>${presets.map((p, i) => `<option value="${i}">${esc(p.label)}${p.commute || p.business ? `（${p.commute ? '通勤 ' + p.commute : ''}${p.commute && p.business ? '・' : ''}${p.business ? '出張 ' + p.business : ''} MI）` : ''}</option>`).join('')}</select>
+      <input class="t" id="g_note" value="${esc(g.note)}" placeholder="例：Home <-> SHC" style="margin-top:8px" autocomplete="off">
+      <div class="row2">
+        <div><label class="f" for="g_commute">通勤（MI）</label><input class="t" id="g_commute" inputmode="decimal" value="${esc(g.commute)}" placeholder="0"></div>
+        <div><label class="f" for="g_business">出張（MI）</label><input class="t" id="g_business" inputmode="decimal" value="${esc(g.business)}" placeholder="0"></div>
+      </div>
+      <div class="hint">社用車で出張した日は「出張（MI）」に距離を。走らなかった日は空のままで。</div>
+    </div>
     <div class="actions"><button class="btn" id="e_cancel" type="button">やめる</button><button class="btn primary" id="e_save" type="button">保存して送る</button></div>
   </div>`;
   document.body.appendChild(back);
@@ -302,6 +334,8 @@ function openEditor(date) {
   showOt(); showWork();
   q('#e_kind').querySelectorAll('button').forEach((b) => b.onclick = () => { v.区分 = b.dataset.k; q('#e_kind').querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b)); if (v.区分 === '出張' && !q('#e_place').value) q('#e_place').focus(); showWork(); });
   back.querySelectorAll('[data-s]').forEach((b) => b.onclick = () => { const k = b.dataset.s; v[k] = Math.max(0, Math.min(24, Math.round((Number(v[k] || 0) + Number(b.dataset.d)) * 2) / 2)); showOt(); });
+  // よく使う目的を選ぶと、目的と距離が入る（PC のガソリン代の画面と同じ）
+  q('#g_preset').onchange = (e) => { const p = presets[Number(e.target.value)]; if (!p) return; q('#g_note').value = p.label; q('#g_commute').value = p.commute ?? ''; q('#g_business').value = p.business ?? ''; e.target.value = ''; };
   const close = () => back.remove();
   q('#e_cancel').onclick = close;
   back.addEventListener('click', (e) => { if (e.target === back) close(); });
@@ -311,11 +345,15 @@ function openEditor(date) {
     const prev = MINE[date] ? MINE[date].勤務実績 : {};
     const edits = {};
     for (const k of KEYS) { const now = v[k], was = k in prev ? prev[k] : base[k]; if (String(now ?? '') !== String(was ?? '')) edits[k] = now; }
-    if (!Object.keys(edits).length) { close(); toast('変わったところはありません'); return; }
+    // ガソリン代：数字に直して、変わっていれば1日分まとめて送る
+    const numOrEmpty = (s) => { const t = String(s).trim().replace(/[^\d.]/g, ''); return t === '' ? '' : Math.round(Number(t) * 10) / 10; };
+    const gNow = { commute: numOrEmpty(q('#g_commute').value), business: numOrEmpty(q('#g_business').value), note: q('#g_note').value.trim() };
+    const gasChanged = ['commute', 'business', 'note'].some((k) => String(gNow[k] ?? '') !== String(g[k] ?? ''));
+    if (!Object.keys(edits).length && !gasChanged) { close(); toast('変わったところはありません'); return; }
     const at = Date.now();
-    MINE[date] = { at, sent: false, 勤務実績: { ...prev, ...edits } };
+    MINE[date] = { at, sent: false, 勤務実績: { ...prev, ...edits }, ...(gasChanged ? { ガソリン代: gNow } : MINE[date] && MINE[date].ガソリン代 ? { ガソリン代: MINE[date].ガソリン代 } : {}) };
     const stamp = new Date(at).toISOString().replace(/[-:]/g, '').replace(/\..*/, '');
-    const body = { 種類: 'SHC Work Hub スマホの入力', 形式版: 1, 作成: new Date(at).toISOString(), date, 勤務実績: edits };
+    const body = { 種類: 'SHC Work Hub スマホの入力', 形式版: 1, 作成: new Date(at).toISOString(), date, 勤務実績: edits, ...(gasChanged ? { ガソリン代: gNow } : {}) };
     OUTBOX.push({ name: `${stamp}_${date}_${Math.random().toString(36).slice(2, 7)}.json`, body });
     LS.set('mine', MINE); LS.set('outbox', OUTBOX);
     close(); render();
